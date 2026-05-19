@@ -38,7 +38,7 @@ function Header({ currentPage, onNavigate, hasAnalysis, onReset, user, onLogout 
             </div>
             <div>
               <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: '1.25rem', fontWeight: 700, color: 'var(--ink-900)', lineHeight: 1.1 }}>
-                Ledger<span style={{ color: 'var(--amber)' }}>Lens</span>
+                Trace<span style={{ color: 'var(--amber)' }}>Ring</span>
               </h1>
             </div>
           </button>

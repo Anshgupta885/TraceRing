@@ -1,7 +1,7 @@
 {
-  "name": "fraud-detection-backend",
+  "name": "tracering-backend",
   "version": "1.0.0",
-  "description": "Graph-Based Financial Crime Detection Engine - Express Backend",
+  "description": "TraceRing - Express Backend",
   "main": "src/index.js",
   "scripts": {
     "dev": "node --watch src/index.js",

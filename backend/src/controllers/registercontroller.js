@@ -1,5 +1,8 @@
 const user=require('../models/usermodel').default;
 const bcrypt=require('bcrypt');
+const jwt = require('jsonwebtoken');
+const dotenv = require('dotenv');
+dotenv.config();
 
 async function register(req,res){
     try {
@@ -22,11 +25,14 @@ async function register(req,res){
         });
 
         if(newUser){
+            // sign a token so the user is logged in immediately after register
+            const token = jwt.sign({_id:newUser._id}, process.env.JWT_SECRET, { expiresIn: '1h' });
             return res.status(201).json({
                 _id:newUser._id,
                 name:newUser.name,
                 email:newUser.email,
                 role:newUser.role,
+                token,
             });
         }else{
             return res.status(400).json({message:'Invalid user data'});

@@ -2,10 +2,11 @@
  * Home Page — warm editorial / human aesthetic
  */
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { uploadFile } from '../services/api';
+import { getAnalysis, getUserResults, uploadFile } from '../services/api';
 import LoadingSpinner from '../components/LoadingSpinner';
+import UserResultsPanel from '../components/UserResultsPanel';
 
 const PATTERNS = [
   {
@@ -25,10 +26,57 @@ const PATTERNS = [
   },
 ];
 
-function HomePage({ uploadStatus, setUploadStatus, error, setError, onAnalysisComplete, onNavigate }) {
+function HomePage({ uploadStatus, setUploadStatus, error, setError, onAnalysisComplete, onNavigate, isAuthenticated, user, onOpenAnalysis }) {
+  const [userResults, setUserResults] = useState(user?.resultsStats || null);
+  const [resultsLoading, setResultsLoading] = useState(false);
+  const [resultsError, setResultsError] = useState(null);
+  const [selectedSessionId, setSelectedSessionId] = useState(null);
+  const [openingSessionId, setOpeningSessionId] = useState(null);
+
+  const loadUserResults = useCallback(async () => {
+    if (!isAuthenticated) {
+      setUserResults(null);
+      setResultsError(null);
+      return;
+    }
+
+    setResultsLoading(true);
+    try {
+      const response = await getUserResults();
+      setUserResults(response.data || null);
+      setResultsError(null);
+    } catch (err) {
+      setResultsError(err.message || 'Failed to load saved results');
+      if (!user?.resultsStats) {
+        setUserResults(null);
+      }
+    } finally {
+      setResultsLoading(false);
+    }
+  }, [isAuthenticated, user?.resultsStats]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      if (user?.resultsStats) {
+        setUserResults(user.resultsStats);
+      }
+      loadUserResults();
+      return;
+    }
+
+    setUserResults(null);
+    setResultsError(null);
+  }, [isAuthenticated, user, loadUserResults]);
+
   const onDrop = useCallback(
     async (acceptedFiles) => {
-      const file = acceptedFiles[0];
+      if (!isAuthenticated) {
+        setError('Please sign in to upload a file');
+        if (onNavigate) onNavigate('login');
+        return;
+      }
+
+      const file = acceptedFiles[0]; 
       if (!file) { setError('Please select a CSV file'); return; }
       if (!file.name.endsWith('.csv')) { setError('Only CSV files are supported'); return; }
 
@@ -39,7 +87,7 @@ function HomePage({ uploadStatus, setUploadStatus, error, setError, onAnalysisCo
         setUploadStatus('processing');
         const response = await uploadFile(file);
         if (response.success && response.data && response.sessionId) {
-          onAnalysisComplete(response.data, response.sessionId);
+          onAnalysisComplete(response.data, response.sessionId, { fileName: file.name });
         } else {
           setError(response.message || 'Analysis failed');
           setUploadStatus('error');
@@ -49,14 +97,62 @@ function HomePage({ uploadStatus, setUploadStatus, error, setError, onAnalysisCo
         setUploadStatus('error');
       }
     },
-    [setError, setUploadStatus, onAnalysisComplete]
+    [isAuthenticated, setError, setUploadStatus, onAnalysisComplete, onNavigate]
   );
+
+  const handleOpenHistoryResult = useCallback(async (item) => {
+    if (!item?.sessionId) {
+      return;
+    }
+
+    setSelectedSessionId(item.sessionId);
+    setOpeningSessionId(item.sessionId);
+    setResultsError(null);
+
+    try {
+      const response = await getAnalysis(item.sessionId);
+      if (response?.data && onOpenAnalysis) {
+        onOpenAnalysis(response.data, {
+          sessionId: item.sessionId,
+          fileName: item.fileName,
+          analyzedAt: item.analyzedAt,
+        });
+        return;
+      }
+
+      setResultsError('Could not load that saved analysis.');
+    } catch (err) {
+      setResultsError(err.message || 'Failed to open saved analysis');
+    } finally {
+      setOpeningSessionId(null);
+    }
+  }, [onOpenAnalysis]);
+  useEffect(() => {
+    if (isAuthenticated && error === 'Please sign in to upload a file') {
+      setError(null);
+    }
+  }, [isAuthenticated, error, setError]);
+
+  const handleDropzoneClick = useCallback((event) => {
+    if (isAuthenticated) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    setError('Please sign in to upload a file');
+    if (onNavigate) onNavigate('login');
+  }, [isAuthenticated, onNavigate, setError]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: { 'text/csv': ['.csv'] },
     maxFiles: 1,
     disabled: uploadStatus === 'uploading' || uploadStatus === 'processing',
+  });
+
+  const dropzoneRootProps = getRootProps({
+    onClick: handleDropzoneClick,
   });
 
   const isLoading = uploadStatus === 'uploading' || uploadStatus === 'processing';
@@ -95,15 +191,12 @@ function HomePage({ uploadStatus, setUploadStatus, error, setError, onAnalysisCo
           Upload a CSV of financial transactions and our engine maps the graph,
           surfaces suspicious accounts, and identifies fraud ring structures automatically.
         </p>
-        <div style={{ marginTop: '0.75rem' }}>
-          <button onClick={() => onNavigate && onNavigate('login')} className="btn-ghost">Sign in</button>
-        </div>
       </div>
 
       {/* Upload zone */}
       <div className="card mb-6" style={{ padding: 0, overflow: 'hidden' }}>
         <div
-          {...getRootProps()}
+          {...dropzoneRootProps}
           className={isDragActive ? 'dropzone-active' : ''}
           style={{
             border: '2px dashed',
@@ -162,7 +255,7 @@ function HomePage({ uploadStatus, setUploadStatus, error, setError, onAnalysisCo
                 <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                 </svg>
-                Choose file
+                Upload files
               </button>
             </>
           )}
@@ -191,6 +284,40 @@ function HomePage({ uploadStatus, setUploadStatus, error, setError, onAnalysisCo
           <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: '0.875rem', color: '#c44a2a' }}>
             {error}
           </span>
+        </div>
+      )}
+
+      {resultsError && (
+        <div
+          className="animate-fade-in"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            padding: '0.875rem 1rem',
+            background: 'rgba(160, 108, 8, 0.06)',
+            border: '1px solid rgba(160, 108, 8, 0.25)',
+            borderRadius: '3px',
+            borderLeft: '3px solid #a06c08',
+            marginBottom: '1.5rem',
+          }}
+        >
+          <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: '0.875rem', color: '#a06c08' }}>
+            {resultsError}
+          </span>
+        </div>
+      )}
+
+      <UserResultsPanel
+        stats={userResults}
+        loading={resultsLoading}
+        selectedSessionId={selectedSessionId}
+        onSelectResult={handleOpenHistoryResult}
+      />
+
+      {openingSessionId && (
+        <div style={{ marginTop: '-0.5rem', marginBottom: '1.5rem', fontFamily: "'DM Sans', sans-serif", fontSize: '0.8rem', color: '#a09590' }}>
+          Opening saved analysis…
         </div>
       )}
 

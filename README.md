@@ -1,4 +1,4 @@
-# Graph-Based Financial Crime Detection Engine
+# TraceRing
 
 A production-ready web application for detecting money muling patterns, smurfing, and shell network structures in financial transaction data using advanced graph analysis algorithms.
 
@@ -145,8 +145,8 @@ A production-ready web application for detecting money muling patterns, smurfing
 
 ### 1. Clone Repository
 ```bash
-git clone https://github.com/yourusername/fraud-detection-engine.git
-cd fraud-detection-engine
+git clone https://github.com/yourusername/tracering.git
+cd tracering
 ```
 
 ### 2. Backend Setup
@@ -179,9 +179,9 @@ npm run dev
 ```
 
 ### 5. Access Application
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:5000
-- AI Service: http://localhost:8000
+- Frontend: open the Vite dev server URL shown in your terminal
+- Backend API: available under the same app origin at `/api`
+- AI Service: http://your-ai-host:8000
 
 ---
 
@@ -199,14 +199,14 @@ docker-compose up -d
 #### Backend (.env)
 ```
 PORT=5000
-MONGODB_URI=mongodb://localhost:27017/fraud-detection
+MONGODB_URI=mongodb://localhost:27017/tracering
 AI_SERVICE_URL=http://localhost:8000
 NODE_ENV=production
 ```
 
 #### Frontend (.env)
 ```
-VITE_API_URL=http://localhost:5000/api
+VITE_API_URL=/api
 ```
 
 ### Production Build
@@ -217,7 +217,7 @@ cd backend && npm run build && npm start
 
 # Frontend
 cd frontend && npm run build
-# Serve dist/ with nginx or similar
+# Serve frontend/dist with nginx or similar
 
 # AI Service
 cd ai-service && uvicorn main:app --host 0.0.0.0 --port 8000
@@ -371,5 +371,5 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 ## Support
 
-For issues and feature requests, please use the [GitHub Issues](https://github.com/yourusername/fraud-detection-engine/issues) page.
+For issues and feature requests, please use the [GitHub Issues](https://github.com/yourusername/tracering/issues) page.
 "# rift" 

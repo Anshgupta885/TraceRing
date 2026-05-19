@@ -11,7 +11,7 @@ import SummaryCards from '../components/SummaryCards';
 import FraudExplanationPanel from '../components/FraudExplanationPanel';
 import RiskHeatmap from '../components/RiskHeatmap';
 
-function DashboardPage({ analysisData, onReset }) {
+function DashboardPage({ analysisData, onReset, analysisMeta }) {
   const [activeTab, setActiveTab] = useState('graph');
   const [selectedAccount, setSelectedAccount] = useState(null);
   const [selectedRing, setSelectedRing] = useState(null);
@@ -51,6 +51,11 @@ function DashboardPage({ analysisData, onReset }) {
           <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 'clamp(1.5rem, 3vw, 2rem)', fontWeight: 700, color: 'var(--ink-900)', lineHeight: 1.2 }}>
             Transaction graph report
           </h2>
+          {analysisMeta?.fileName && (
+            <p style={{ marginTop: '0.5rem', fontFamily: "'DM Sans', sans-serif", fontSize: '0.85rem', color: '#a09590' }}>
+              Showing analysis for {analysisMeta.fileName}
+            </p>
+          )}
         </div>
         <button
           className="btn-primary"

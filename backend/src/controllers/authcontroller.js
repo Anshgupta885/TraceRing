@@ -2,6 +2,7 @@ const user=require('../models/usermodel').default;
 const bcrypt=require('bcrypt');
 const jwt=require('jsonwebtoken');
 const dotenv=require('dotenv');
+const { getUserAnalysisStats } = require('../services/analysisService');
 dotenv.config();
 
 async function login(req,res){
@@ -19,12 +20,14 @@ async function login(req,res){
             return res.status(400).json({message:'Invalid email or password'});
         }
         const token=jwt.sign({_id:userExists._id},process.env.JWT_SECRET,{expiresIn:'1h'});
+        const resultsStats = await getUserAnalysisStats(userExists._id);
         return res.status(200).json({
             _id:userExists._id,
             name:userExists.name,
             email:userExists.email,
             role:userExists.role,
-            token
+            token,
+            resultsStats
         });
     } catch (error) {
         console.error('Login error:', error);

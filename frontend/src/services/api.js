@@ -4,11 +4,58 @@
 
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+const API_BASE_URL = '/api';
+const AUTH_TOKEN_KEY = 'authToken';
+const AUTH_USER_KEY = 'authUser';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 60000, // 60 second timeout for large files
+});
+
+function getStoredToken() {
+  try {
+    return localStorage.getItem(AUTH_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setStoredAuth(token, userData) {
+  try {
+    if (token) {
+      localStorage.setItem(AUTH_TOKEN_KEY, token);
+    }
+    if (userData) {
+      localStorage.setItem(AUTH_USER_KEY, JSON.stringify(userData));
+    }
+  } catch {
+    // Ignore storage errors so login flow does not break in restricted environments.
+  }
+}
+
+export function getStoredAuthUser() {
+  try {
+    const raw = localStorage.getItem(AUTH_USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Re-attach token after full page reloads.
+const bootToken = getStoredToken();
+if (bootToken) {
+  api.defaults.headers.common['Authorization'] = `Bearer ${bootToken}`;
+}
+
+api.interceptors.request.use((config) => {
+  const token = getStoredToken();
+  if (token) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 /**
@@ -45,6 +92,22 @@ export async function getAnalysis(sessionId) {
     if (axios.isAxiosError(error)) {
       const axiosError = error;
       throw new Error(axiosError.response?.data?.message || 'Failed to retrieve analysis');
+    }
+    throw error;
+  }
+}
+
+/**
+ * Get the authenticated user's analysis statistics and recent results
+ */
+export async function getUserResults() {
+  try {
+    const response = await api.get('/user/results');
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      const axiosError = error;
+      throw new Error(axiosError.response?.data?.message || 'Failed to load user results');
     }
     throw error;
   }
@@ -90,6 +153,13 @@ export async function checkHealth() {
 export async function registerUser({ name, email, password, role = 'user' }) {
   try {
     const response = await api.post('/user/register', { name, email, password, role });
+    // store token locally for subsequent requests if returned
+    if (response.data && response.data.token) {
+      localStorage.setItem(AUTH_TOKEN_KEY, response.data.token);
+      api.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
+    }
+    // persist user info for UI state
+    setStoredAuth(response.data?.token, response.data);
     return response.data;
   } catch (error) {
     if (axios.isAxiosError(error)) {
@@ -108,9 +178,10 @@ export async function loginUser({ email, password }) {
     const response = await api.post('/user/login', { email, password });
     // store token locally for subsequent requests
     if (response.data && response.data.token) {
-      localStorage.setItem('authToken', response.data.token);
+      localStorage.setItem(AUTH_TOKEN_KEY, response.data.token);
       api.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
     }
+    setStoredAuth(response.data?.token, response.data);
     return response.data;
   } catch (error) {
     if (axios.isAxiosError(error)) {
@@ -125,6 +196,7 @@ export async function loginUser({ email, password }) {
  * Logout user locally
  */
 export function logoutUser() {
-  localStorage.removeItem('authToken');
+  localStorage.removeItem(AUTH_TOKEN_KEY);
   delete api.defaults.headers.common['Authorization'];
+  localStorage.removeItem(AUTH_USER_KEY);
 }

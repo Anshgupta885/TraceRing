@@ -10,7 +10,6 @@ Performance optimized for 10K+ transactions.
 """
 
 import networkx as nx
-import pandas as pd
 from typing import List, Dict, Set, Tuple, Optional
 from datetime import timedelta, datetime
 from collections import defaultdict
@@ -33,9 +32,47 @@ class DetectionEngine:
         Args:
             transactions: List of transaction dictionaries
         """
-        self.transactions = transactions
-        self.df = pd.DataFrame(transactions)
+        self.transactions = self._prepare_transactions(transactions)
+        self.transactions_by_account = defaultdict(list)
+        self.transactions_by_sender = defaultdict(list)
+        self.transactions_by_receiver = defaultdict(list)
+        self.accounts = set()
+
+        for tx in self.transactions:
+            sender = tx["sender_id"]
+            receiver = tx["receiver_id"]
+            self.accounts.add(sender)
+            self.accounts.add(receiver)
+            self.transactions_by_account[sender].append(tx)
+            self.transactions_by_account[receiver].append(tx)
+            self.transactions_by_sender[sender].append(tx)
+            self.transactions_by_receiver[receiver].append(tx)
+
         self.graph = self._build_graph()
+
+    def _prepare_transactions(self, transactions: List[Dict]) -> List[Dict]:
+        prepared = []
+        for tx in transactions:
+            tx_copy = dict(tx)
+            tx_copy["_timestamp"] = self._parse_timestamp(tx_copy.get("timestamp"))
+            prepared.append(tx_copy)
+        return prepared
+
+    def _parse_timestamp(self, value) -> Optional[datetime]:
+        if isinstance(value, datetime):
+            return value
+        if value is None:
+            return None
+        text = str(value).strip().replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(text)
+        except ValueError:
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+                try:
+                    return datetime.strptime(text, fmt)
+                except ValueError:
+                    continue
+        return None
         
     def _build_graph(self) -> nx.DiGraph:
         """Build NetworkX directed graph from transactions, excluding self-loops."""
@@ -246,7 +283,9 @@ class DetectionEngine:
         try:
             timestamps = []
             for ed in edge_data:
-                ts = pd.to_datetime(ed['timestamp'])
+                ts = self._parse_timestamp(ed['timestamp'])
+                if ts is None:
+                    raise ValueError("Invalid timestamp")
                 timestamps.append(ts)
             
             if timestamps:
@@ -311,21 +350,16 @@ class DetectionEngine:
         if cycle_participants is None:
             cycle_participants = set()
         
-        if self.df.empty:
+        if not self.transactions:
             return fan_in, fan_out
-        
-        # Convert timestamp to datetime
-        df = self.df.copy()
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df = df.sort_values('timestamp')
         
         time_window = timedelta(hours=time_window_hours)
         dispersal_window = timedelta(hours=48)
         
         # First pass: identify potential aggregators (fan-in candidates)
         potential_aggregators: Dict[str, Tuple[List[str], datetime, datetime]] = {}
-        
-        for receiver, group in df.groupby('receiver_id'):
+
+        for receiver, group in self.transactions_by_receiver.items():
             senders_in_window, window_start, window_end = self._get_unique_counterparties_in_window_with_timing(
                 group, 'sender_id', time_window
             )
@@ -336,22 +370,23 @@ class DetectionEngine:
         # Fan-in alone is NOT suspicious - must be followed by dispersal
         for account, (senders, agg_start, agg_end) in potential_aggregators.items():
             # Check for outgoing transactions after aggregation
-            outgoing_after = df[
-                (df['sender_id'] == account) & 
-                (df['timestamp'] > agg_start) &
-                (df['timestamp'] <= agg_end + dispersal_window)
+            outgoing_after = [
+                tx for tx in self.transactions_by_sender.get(account, [])
+                if tx.get("_timestamp") is not None
+                and tx["_timestamp"] > agg_start
+                and tx["_timestamp"] <= agg_end + dispersal_window
             ]
             
             # Must have meaningful outgoing dispersal (multiple receivers)
             if len(outgoing_after) >= 3:
-                unique_receivers = outgoing_after['receiver_id'].nunique()
+                unique_receivers = len({tx['receiver_id'] for tx in outgoing_after})
                 # Redistribution must be to multiple parties (not just 1-2)
                 if unique_receivers >= 3:
                     fan_in[account] = senders
         
         # Fan-out: suspicious ONLY if funds originate from aggregation or cycle
         # Not just degree-based heuristics
-        for sender, group in df.groupby('sender_id'):
+        for sender, group in self.transactions_by_sender.items():
             receivers_in_window, window_start, window_end = self._get_unique_counterparties_in_window_with_timing(
                 group, 'receiver_id', time_window
             )
@@ -361,13 +396,14 @@ class DetectionEngine:
                 is_from_cycle = sender in cycle_participants
                 
                 # Check for incoming transactions before dispersal (from multiple sources)
-                incoming_before = df[
-                    (df['receiver_id'] == sender) & 
-                    (df['timestamp'] < window_end) &
-                    (df['timestamp'] >= window_start - dispersal_window)
+                incoming_before = [
+                    tx for tx in self.transactions_by_receiver.get(sender, [])
+                    if tx.get("_timestamp") is not None
+                    and tx["_timestamp"] < window_end
+                    and tx["_timestamp"] >= window_start - dispersal_window
                 ]
                 # Require aggregation from multiple unique senders
-                unique_incoming_senders = incoming_before['sender_id'].nunique() if not incoming_before.empty else 0
+                unique_incoming_senders = len({tx['sender_id'] for tx in incoming_before}) if incoming_before else 0
                 has_prior_aggregation = len(incoming_before) >= 5 and unique_incoming_senders >= 3
                 
                 # Only flag if clear causal link exists
@@ -376,16 +412,20 @@ class DetectionEngine:
         
         return fan_in, fan_out
     
-    def _get_unique_counterparties_in_window_with_timing(self, group: pd.DataFrame, 
+    def _get_unique_counterparties_in_window_with_timing(self, group: List[Dict], 
                                               counterparty_col: str,
                                               time_window: timedelta) -> Tuple[Set[str], datetime, datetime]:
         """Get maximum unique counterparties within any time window, with timing info."""
-        if group.empty:
+        if not group:
             return set(), datetime.min, datetime.min
-        
-        group = group.sort_values('timestamp')
-        timestamps = group['timestamp'].values
-        counterparties = group[counterparty_col].values
+
+        valid_rows = [tx for tx in group if tx.get("_timestamp") is not None]
+        if not valid_rows:
+            return set(), datetime.min, datetime.min
+
+        valid_rows.sort(key=lambda tx: tx["_timestamp"])
+        timestamps = [tx["_timestamp"] for tx in valid_rows]
+        counterparties = [tx[counterparty_col] for tx in valid_rows]
         
         max_unique: Set[str] = set()
         best_start = None
@@ -401,7 +441,7 @@ class DetectionEngine:
             
             # Shrink window if outside time bounds
             while left < right:
-                time_diff = pd.Timestamp(timestamps[right]) - pd.Timestamp(timestamps[left])
+                time_diff = timestamps[right] - timestamps[left]
                 if time_diff > time_window:
                     current_window[counterparties[left]] -= 1
                     if current_window[counterparties[left]] == 0:
@@ -412,8 +452,8 @@ class DetectionEngine:
             
             if len(current_window) > len(max_unique):
                 max_unique = set(current_window.keys())
-                best_start = pd.Timestamp(timestamps[left]).to_pydatetime()
-                best_end = pd.Timestamp(timestamps[right]).to_pydatetime()
+                best_start = timestamps[left]
+                best_end = timestamps[right]
         
         if best_start is None:
             best_start = datetime.min
@@ -529,21 +569,16 @@ class DetectionEngine:
         """
         high_velocity: Dict[str, int] = {}
         
-        if self.df.empty:
+        if not self.transactions:
             return high_velocity
-        
-        df = self.df.copy()
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        
-        all_accounts = set(df['sender_id'].unique()) | set(df['receiver_id'].unique())
+
+        all_accounts = set(self.transactions_by_sender.keys()) | set(self.transactions_by_receiver.keys())
         time_window = timedelta(hours=time_window_hours)
         
         for account in all_accounts:
-            account_txs = df[
-                (df['sender_id'] == account) | (df['receiver_id'] == account)
-            ].sort_values('timestamp')
-            
-            if account_txs.empty:
+            account_txs = sorted(self.transactions_by_account.get(account, []), key=lambda tx: tx.get("_timestamp") or datetime.min)
+
+            if not account_txs:
                 continue
             
             max_count, has_variance = self._analyze_velocity_with_variance(
@@ -557,7 +592,7 @@ class DetectionEngine:
         
         return high_velocity
     
-    def _analyze_velocity_with_variance(self, df: pd.DataFrame, 
+    def _analyze_velocity_with_variance(self, txs: List[Dict], 
                                          time_window: timedelta) -> Tuple[int, bool]:
         """
         Analyze velocity with amount variance consideration.
@@ -566,11 +601,16 @@ class DetectionEngine:
             Tuple of (max_count, has_suspicious_variance)
             - has_suspicious_variance: True if mix of small and large amounts
         """
-        if df.empty:
+        if not txs:
             return 0, False
         
-        timestamps = df['timestamp'].sort_values().values
-        amounts = df['amount'].values
+        rows = [tx for tx in txs if tx.get("_timestamp") is not None]
+        if not rows:
+            return 0, False
+
+        rows.sort(key=lambda tx: tx["_timestamp"])
+        timestamps = [tx["_timestamp"] for tx in rows]
+        amounts = [tx.get("amount", 0) for tx in rows]
         n = len(timestamps)
         max_count = 1
         best_window_amounts: List[float] = []
@@ -578,7 +618,7 @@ class DetectionEngine:
         
         for right in range(n):
             while left < right:
-                time_diff = pd.Timestamp(timestamps[right]) - pd.Timestamp(timestamps[left])
+                time_diff = timestamps[right] - timestamps[left]
                 if time_diff > time_window:
                     left += 1
                 else:
@@ -632,31 +672,35 @@ class DetectionEngine:
         if cycle_participants is None:
             cycle_participants = set()
         
-        if self.df.empty:
+        if not self.transactions:
             return merchants
-        
-        df = self.df.copy()
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        
+
+        timestamps = [tx.get("_timestamp") for tx in self.transactions if tx.get("_timestamp") is not None]
+        if not timestamps:
+            return merchants
+
         # Calculate time span of dataset
-        total_span = (df['timestamp'].max() - df['timestamp'].min()).days + 1
+        total_span = (max(timestamps) - min(timestamps)).days + 1
         
         # Analyze each account
-        for receiver, group in df.groupby('receiver_id'):
+        for receiver, group in self.transactions_by_receiver.items():
             # Skip if account participates in cycles
             if receiver in cycle_participants:
                 continue
             
-            unique_senders = group['sender_id'].nunique()
+            unique_senders = len({tx['sender_id'] for tx in group})
             incoming_tx_count = len(group)
             
             # Check outgoing transactions
-            outgoing_group = df[df['sender_id'] == receiver]
+            outgoing_group = self.transactions_by_sender.get(receiver, [])
             outgoing_tx_count = len(outgoing_group)
-            unique_receivers = outgoing_group['receiver_id'].nunique() if not outgoing_group.empty else 0
+            unique_receivers = len({tx['receiver_id'] for tx in outgoing_group}) if outgoing_group else 0
             
             # Calculate transaction time span for this account
-            account_span = (group['timestamp'].max() - group['timestamp'].min()).days + 1
+            group_timestamps = [tx.get("_timestamp") for tx in group if tx.get("_timestamp") is not None]
+            if not group_timestamps:
+                continue
+            account_span = (max(group_timestamps) - min(group_timestamps)).days + 1
             
             # Merchant criteria:
             # - High fan-in (many unique senders, 10+)

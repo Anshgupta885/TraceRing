@@ -6,15 +6,20 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.processTransactions = processTransactions;
 exports.getAnalysisBySession = getAnalysisBySession;
+exports.getUserAnalysisStats = getUserAnalysisStats;
 exports.formatForDownload = formatForDownload;
 const uuid_1 = require("uuid");
 const csvParser_1 = require("../utils/csvParser");
 const aiService_1 = require("./aiService");
 const Analysis_model_1 = require("../models/Analysis.model");
+const UserAnalysisStats_model_1 = require("../models/UserAnalysisStats.model");
 /**
  * Process uploaded transactions and generate analysis
  */
-async function processTransactions(transactions, fileName) {
+async function processTransactions(transactions, fileName, userId) {
+    if (!userId) {
+        throw new Error('Authentication required to process transactions');
+    }
     const sessionId = (0, uuid_1.v4)();
     const startTime = Date.now();
     let aiResponse;
@@ -73,7 +78,7 @@ async function processTransactions(transactions, fileName) {
         }
     };
     // Save to MongoDB (non-blocking)
-    saveAnalysis(sessionId, fileName, response, transactions).catch(err => {
+    await saveAnalysis(sessionId, fileName, response, transactions, userId).catch(err => {
         console.error('Failed to save analysis:', err.message);
     });
     return { sessionId, response };
@@ -81,9 +86,10 @@ async function processTransactions(transactions, fileName) {
 /**
  * Save analysis to MongoDB
  */
-async function saveAnalysis(sessionId, fileName, response, transactions) {
+async function saveAnalysis(sessionId, fileName, response, transactions, userId) {
     try {
         const analysis = new Analysis_model_1.Analysis({
+            userId,
             sessionId,
             fileName,
             graphData: response.graph_data,
@@ -91,11 +97,42 @@ async function saveAnalysis(sessionId, fileName, response, transactions) {
             rawTransactions: transactions
         });
         await analysis.save();
+        await upsertUserAnalysisStats(userId, sessionId, fileName, response);
         console.log(`Analysis saved with session ID: ${sessionId}`);
     }
     catch (error) {
         console.error('MongoDB save error:', error.message);
     }
+}
+
+async function upsertUserAnalysisStats(userId, sessionId, fileName, response) {
+    const summary = response.fraud_analysis.summary;
+    await UserAnalysisStats_model_1.default.findOneAndUpdate({ userId }, {
+        $setOnInsert: { userId },
+        $inc: {
+            totalAnalyses: 1,
+            totalAccountsAnalyzed: summary.total_accounts_analyzed,
+            totalSuspiciousAccountsFlagged: summary.suspicious_accounts_flagged,
+            totalFraudRingsDetected: summary.fraud_rings_detected,
+        },
+        $set: {
+            lastAnalyzedAt: new Date(),
+        },
+        $push: {
+            latestResults: {
+                $each: [{
+                    sessionId,
+                    fileName,
+                    summary,
+                    analyzedAt: new Date(),
+                }],
+                $slice: -5,
+            },
+        },
+    }, {
+        upsert: true,
+        new: true,
+    });
 }
 /**
  * Get analysis by session ID
@@ -113,6 +150,40 @@ async function getAnalysisBySession(sessionId) {
     catch (error) {
         console.error('MongoDB query error:', error.message);
         return null;
+    }
+}
+async function getUserAnalysisStats(userId) {
+    try {
+        const stats = await UserAnalysisStats_model_1.default.findOne({ userId });
+        if (!stats) {
+            return {
+                totalAnalyses: 0,
+                totalAccountsAnalyzed: 0,
+                totalSuspiciousAccountsFlagged: 0,
+                totalFraudRingsDetected: 0,
+                lastAnalyzedAt: null,
+                latestResults: [],
+            };
+        }
+        return {
+            totalAnalyses: stats.totalAnalyses,
+            totalAccountsAnalyzed: stats.totalAccountsAnalyzed,
+            totalSuspiciousAccountsFlagged: stats.totalSuspiciousAccountsFlagged,
+            totalFraudRingsDetected: stats.totalFraudRingsDetected,
+            lastAnalyzedAt: stats.lastAnalyzedAt,
+            latestResults: stats.latestResults,
+        };
+    }
+    catch (error) {
+        console.error('MongoDB stats query error:', error.message);
+        return {
+            totalAnalyses: 0,
+            totalAccountsAnalyzed: 0,
+            totalSuspiciousAccountsFlagged: 0,
+            totalFraudRingsDetected: 0,
+            lastAnalyzedAt: null,
+            latestResults: [],
+        };
     }
 }
 /**

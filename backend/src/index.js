@@ -1,6 +1,6 @@
 "use strict";
 /**
- * Graph-Based Financial Crime Detection Engine
+ * TraceRing
  * Express Backend Entry Point
  */
 var __importDefault = (this && this.__importDefault) || function (mod) {
@@ -14,6 +14,7 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const upload_routes_1 = __importDefault(require("./routes/upload.routes"));
 const analysis_routes_1 = __importDefault(require("./routes/analysis.routes"));
 const auth_routes_1 = __importDefault(require("./routes/auth.routes"));
+const user_routes_1 = __importDefault(require("./routes/user.routes"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5000;
@@ -21,7 +22,7 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/fraud-
 
 
 app.get('/', (req, res) => {
-    res.send('Welcome to the Graph-Based Financial Crime Detection Engine API');
+    res.send('Welcome to the TraceRing API');
 });
 // Middleware
 app.use((0, cors_1.default)({
@@ -34,6 +35,7 @@ app.use(express_1.default.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/api', upload_routes_1.default);
 app.use('/api', analysis_routes_1.default);
 app.use('/api', auth_routes_1.default);
+app.use('/api', user_routes_1.default);
 // Health check
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });

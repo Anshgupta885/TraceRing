@@ -73,6 +73,7 @@ const GraphEdgeSchema = new mongoose_1.Schema({
     is_fraud_ring_edge: { type: Boolean, default: false }
 }, { _id: false });
 const AnalysisSchema = new mongoose_1.Schema({
+    userId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     sessionId: { type: String, required: true, unique: true, index: true },
     fileName: { type: String, required: true },
     graphData: {
