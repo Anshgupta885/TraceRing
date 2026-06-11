@@ -12,7 +12,7 @@
       "root": "backend",
       "routePrefix": "/_/backend",
       "runtime": "nodejs",
-      "entrypoint": "index.js"
+      "entrypoint": "src/index.js"
     }
   }
 }
