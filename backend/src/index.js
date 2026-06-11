@@ -17,7 +17,6 @@ const auth_routes_1 = __importDefault(require("./routes/auth.routes"));
 const user_routes_1 = __importDefault(require("./routes/user.routes"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
-const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/fraud-detection';
 
 
@@ -48,20 +47,15 @@ app.use((err, req, res, next) => {
         message: err.message || 'Internal server error'
     });
 });
-// Connect to MongoDB and start server
+// Connect to MongoDB when the function is loaded.
 mongoose_1.default.connect(MONGODB_URI)
     .then(() => {
     console.log('Connected to MongoDB');
-    app.listen(PORT, () => {
-        console.log(`Server running on port ${PORT}`);
-    });
 })
     .catch((error) => {
     console.error('MongoDB connection error:', error);
-    // Start server anyway for development without MongoDB
-    app.listen(PORT, () => {
-        console.log(`Server running on port ${PORT} (without MongoDB)`);
-    });
 });
 exports.default = app;
+module.exports = app;
+module.exports.default = app;
 //# sourceMappingURL=index.js.map

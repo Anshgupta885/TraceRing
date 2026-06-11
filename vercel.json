@@ -1,18 +1,5 @@
 {
   "buildCommand": "cd frontend && npm install && npm run build",
   "outputDirectory": "frontend/dist",
-  "framework": null,
-  "experimentalServices": {
-    "frontend": {
-      "root": "frontend",
-      "routePrefix": "/",
-      "framework": "vite"
-    },
-    "backend": {
-      "root": "backend",
-      "routePrefix": "/_/backend",
-      "runtime": "nodejs",
-      "entrypoint": "src/index.js"
-    }
-  }
+  "framework": null
 }
